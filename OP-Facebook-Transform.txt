@@ -1,0 +1,99 @@
+let
+    Source = #table(
+        type table
+        [
+            #"ID" = number,
+            #"OP" = number,
+            #"Monto" = number
+        ],
+        {
+            {1, 321,  5436},
+            {1, 321,  3450},
+            {2, 623,  1500},
+            {2, 634,  1200},
+            {3, 453,  3456},
+            {3, 453,  1245},
+            {4, 876,  4562},
+            {4, 582,  2340},
+            {5, 342,  1290},
+            {5, 342,  6780}
+        }
+    ),
+    //se agrupan por ID con todos los registros
+    #"Grouped Rows" = Table.Group(Source, {"ID"}, {{"All", each _, type table [ID=number, OP=number, Monto=number]}}),
+
+    // se agrega un indice por ID iniciando desde el 1
+    #"Added Custom" = Table.AddColumn(#"Grouped Rows", "All_Index", each Table.AddIndexColumn ([All] , "index", 1 )),
+
+    //se remueve la columna que contiene la tabla agrupada sin indice
+    #"Removed Other Columns" = Table.SelectColumns(#"Added Custom",{"ID", "All_Index"}),
+    
+    // se expande el indice creado por ID
+    #"Expanded All_Index" = Table.ExpandTableColumn(#"Removed Other Columns", "All_Index", {"OP", "Monto", "index"}, {"OP", "Monto", "index"}),
+
+    // se identifica el tipo de dato
+    #"Changed Type" = Table.TransformColumnTypes(#"Expanded All_Index",{{"OP", Int64.Type}, {"Monto", Int64.Type}, {"index", Int64.Type}}),
+
+    // se crea un nuevo indice iniciando desde 0
+    #"Inserted Subtraction" = Table.AddColumn(#"Changed Type", "Subtraction", each [index] - 1, type number),
+
+    // se concatena el indice 1 con el Id para crear un identificador unico por registro
+    #"Added Custom1" = Table.AddColumn(#"Inserted Subtraction", "Indice1", each Text.From ([ID] ) & "-" & Text.From ([index] )),
+
+    // se concatena el indice 0 con el Id para crear un identificador unico por registro
+    #"Added Custom2" = Table.AddColumn(#"Added Custom1", "indice2", each Text.From ([ID] ) & "-" & Text.From ([Subtraction] )),
+
+    // se remueven las columnas del indice 1 e indice 0 
+    #"Removed Other Columns1" = Table.SelectColumns(#"Added Custom2",{"ID", "OP", "Monto", "Indice1", "indice2"}),
+    
+    // se le asigna texto a los identificadores creados
+    #"Changed Type1" = Table.TransformColumnTypes(#"Removed Other Columns1",{{"Indice1", type text}, {"indice2", type text}}),
+
+    // se realiza un merge de la tabla consigo misma por medio de los indices 1 y 2
+    #"Merged Queries" = Table.NestedJoin(#"Changed Type1", {"Indice1"}, #"Changed Type1", {"indice2"}, "Changed Type1", JoinKind.LeftOuter),
+
+    // se expande la columna OP 
+    #"Expanded Changed Type1" = Table.ExpandTableColumn(#"Merged Queries", "Changed Type1", {"OP"}, {"OP.1"}),
+
+    // se eliminan los valores null
+    #"Filtered Rows" = Table.SelectRows(#"Expanded Changed Type1", each ([OP.1] <> null)),
+    
+    // se establece el criterio para cada ID de acuerdo al OP ( = o <>) y se almacena en una variable
+    var_Criterio = Table.AddColumn(#"Filtered Rows", "Criterio", each if [OP] = [OP.1] then "max" else "sum"),
+    
+    // nos regresamos al paso numero 2 con la agrupación por ID
+    Agrupado_2 = #"Grouped Rows",
+
+    // se realiza un merge entre el Agrupado_2 y la var_Criterio por la columna ID
+    #"Merged Queries1" = Table.NestedJoin(Agrupado_2, {"ID"}, var_Criterio, {"ID"}, "Agrupado_2", JoinKind.LeftOuter),
+
+    // se expande la variable Criterio
+    #"Expanded Agrupado_2" = Table.ExpandTableColumn(#"Merged Queries1", "Agrupado_2", {"Criterio"}, {"Criterio"}),
+
+    // se realiza la operación (obtenicón del valor max o sum) de acuerdo al criterio
+    #"Added Conditional Column" = Table.AddColumn(#"Expanded Agrupado_2", "Operacion_Criterio", each if [Criterio] = "max" then List.Max ( [All][Monto] ) else List.Sum ( [All][Monto] )),
+
+    // se agrupa obteniendo el ultimo registro
+    #"Added Custom3" = Table.AddColumn(#"Added Conditional Column", "Custom", each Table.LastN ([All] , 1 )),
+
+    // se obtiene el ulitmo OP
+    #"Expanded Custom" = Table.ExpandTableColumn(#"Added Custom3", "Custom", {"OP"}, {"Ultimo_OP"}),
+
+    // Se agrupa obteniendo el primer registro
+    #"Added Custom4" = Table.AddColumn(#"Expanded Custom", "Custom", each Table.FirstN ([All] , 1 )),
+
+    // se obtiene el primer OP
+    #"Expanded Custom1" = Table.ExpandTableColumn(#"Added Custom4", "Custom", {"OP"}, {"Primer_OP"}),
+
+    #"Added Custom5" = Table.AddColumn(#"Expanded Custom1", "All_OP", each [All][OP]),
+
+    // se obtienen ambos OP de la BD original
+    all_OP = Table.TransformColumns(#"Added Custom5", {"All_OP", each Text.Combine(List.Transform(_, Text.From), ", "), type text}),
+
+    // se elimina la columna con la agrupación de todas las filas
+    #"Removed Other Columns2" = Table.SelectColumns(all_OP,{"ID", "Criterio", "Operacion_Criterio", "Ultimo_OP", "Primer_OP", "All_OP"}),
+    
+    // se asignan tipo de dato a todas las columnas
+    #"Changed Type2" = Table.TransformColumnTypes(#"Removed Other Columns2",{{"Criterio", type text}, {"Operacion_Criterio", Int64.Type}, {"Ultimo_OP", Int64.Type}, {"Primer_OP", Int64.Type}, {"All_OP", type text}, {"ID", Int64.Type}})
+in
+    #"Changed Type2"
