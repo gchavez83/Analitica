@@ -1,0 +1,30 @@
+(fecha as text) =>
+  let
+    Source = Web.BrowserContents(
+      "https://www.xe.com/currencytables/?from=EUR&date=" & fecha & "#table-section"
+    ), 
+    #"Extracted Table From Html" = Html.Table(
+      Source, 
+      {
+        {"Column1", "TABLE.currencytables__Table-xlq26m-3.jaGdii > * > TR > :nth-child(1)"}, 
+        {"Column2", "TABLE.currencytables__Table-xlq26m-3.jaGdii > * > TR > :nth-child(2)"}, 
+        {"Column3", "TABLE.currencytables__Table-xlq26m-3.jaGdii > * > TR > :nth-child(3)"}, 
+        {"Column4", "TABLE.currencytables__Table-xlq26m-3.jaGdii > * > TR > :nth-child(4)"}
+      }, 
+      [RowSelector = "TABLE.currencytables__Table-xlq26m-3.jaGdii > * > TR"]
+    ), 
+    #"Promoted Headers" = Table.PromoteHeaders(
+      #"Extracted Table From Html", 
+      [PromoteAllScalars = true]
+    ), 
+    #"Changed Type" = Table.TransformColumnTypes(
+      #"Promoted Headers", 
+      {
+        {"Currency", type text}, 
+        {"Name", type text}, 
+        {"Units per EUR", type number}, 
+        {"EUR per unit", type number}
+      }
+    )
+  in
+    #"Changed Type"
